@@ -1,4 +1,4 @@
 (library
  (public_name troupe)
  (name troupe)
- (libraries unix))
+ (libraries unix iomux))

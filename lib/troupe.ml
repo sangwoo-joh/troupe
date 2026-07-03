@@ -1,3 +1,5 @@
+module Reactor = Reactor
+
 type 'msg cell = {
   id : int;
   mailbox : 'msg Mailbox.t;

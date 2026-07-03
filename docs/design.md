@@ -47,7 +47,7 @@ completely backend-agnostic — only the scheduler's handler consults the reacto
 ```
 lib/
 ├── mailbox.mli/.ml   # FIFO queue with selective removal (internal)
-├── reactor.mli/.ml   # module type S + Reactor.Select over Unix.select
+├── reactor.mli/.ml   # module type S + Reactor.Select (Unix.select) / Reactor.Poll (iomux)
 └── troupe.mli/.ml    # cell, effects, Address, verbs, Scheduler.Make, run
 ```
 
@@ -76,11 +76,15 @@ val address : 'msg self -> 'msg Address.t
 val await_readable : Unix.file_descr -> unit
 val sleep          : float -> unit
 
+module Reactor : ...                            (* re-exported: S, Select, Poll *)
 module Scheduler : sig
   module Make (_ : Reactor.S) : sig val run : (unit -> unit) -> unit end
 end
 val run : (unit -> unit) -> unit                (* = Make (Reactor.Select).run *)
 ```
+
+`Reactor` is re-exported from `Troupe` so external code can name a backend and
+apply the functor, e.g. `Troupe.Scheduler.Make (Troupe.Reactor.Poll)`.
 
 ### The effects (internal to `Troupe`)
 
@@ -174,10 +178,12 @@ public `.mli`. Keeping the engine in one module, with the effects private and
 `Scheduler.Make` as a submodule, is simpler and keeps the public API clean.
 `Mailbox` and `Reactor` stay separate because they are genuinely independent.
 
-### `Unix.select` first; `Reactor.S` as a functor boundary
+### `Unix.select` as the default; `Reactor.Poll` alongside it
 
-For I/O readiness we chose the stdlib **`Unix.select`**, behind a `Reactor.S`
-signature consumed by `Scheduler.Make`. Reasoning:
+For I/O readiness the default is the stdlib **`Unix.select`** (`Reactor.Select`),
+behind a `Reactor.S` signature consumed by `Scheduler.Make`. A second backend,
+**`Reactor.Poll`** over `poll(2)` (via the `iomux` library), ships alongside it.
+Reasoning:
 
 - **io_uring** (Eio's `eio_linux` backend) carries a history of security issues
   and is disabled in some hardened environments.
@@ -185,13 +191,15 @@ signature consumed by `Scheduler.Make`. Reasoning:
   Darwin; the kernel equivalent there is `kqueue`). An epoll reactor could not
   even run locally.
 - **`iomux`** currently implements only `poll(2)`/`ppoll(2)` (epoll/kqueue are
-  stated goals, not yet implemented), so it would not have delivered epoll
-  anyway.
+  stated goals, not yet implemented). `poll(2)` is itself portable
+  (Linux/macOS/BSD) and free of `select`'s descriptor-count limit, so
+  `Reactor.Poll` runs everywhere `Select` does.
 - At TUI scale — one or two descriptors (stdin, maybe a signal pipe) — `select`
-  is as fast as anything and is dependency-free and portable.
+  is as fast as anything and is dependency-free, so it stays the default.
 
-The functor makes this reversible: a `poll`/`epoll`/`kqueue`/iomux backend drops
-in behind `Reactor.S` with no change to the scheduler or any actor.
+The functor made this cheap: `Reactor.Poll` dropped in behind `Reactor.S` with no
+change to the scheduler or any actor, and the same tests run against both. A
+future `epoll`/`kqueue` backend would arrive the same way.
 
 ### The reactor owns fd readiness; the scheduler owns timers
 
@@ -225,8 +233,14 @@ The TUI layer, which will actually consume `await_readable` (stdin) and `sleep`
   Acceptable for small mailboxes.
 - **No supervision / restart strategies yet.** An uncaught exception in an actor
   propagates out of the scheduler via the handler's `exnc`.
-- **`select`'s `FD_SETSIZE` limit** (~1024) applies, but is irrelevant at the
-  descriptor counts we target.
+- **`select`'s `FD_SETSIZE` limit** (~1024) applies to the default backend but is
+  irrelevant at the descriptor counts we target; `Reactor.Poll` has no such
+  limit.
+- **Timer resolution differs by backend.** `Reactor.Select` takes a float-seconds
+  timeout; `Reactor.Poll` takes integer milliseconds (`poll(2)`), so `sleep`
+  rounds up to the next millisecond there. Irrelevant for tick subscriptions;
+  sub-millisecond timers would need `ppoll` (which iomux emulates on macOS, as
+  Darwin lacks a real `ppoll`).
 
 ---
 
@@ -237,17 +251,18 @@ Implemented and tested (`dune build`, `dune test`):
 - Mailbox with FIFO and selective removal.
 - Fiber-per-actor scheduler: `cast`, `send`, selective `receive`, park/wake,
   run-to-quiescence.
-- `Reactor.S` + `Reactor.Select`; `Scheduler.Make` functor; `run` as the
-  Select-backed default.
-- I/O waits: `await_readable` (parks in `select`, woken on readiness) and
+- `Reactor.S` with two backends — `Reactor.Select` (default) and `Reactor.Poll`
+  (iomux); `Scheduler.Make` functor; `Reactor` re-exported so consumers can pick
+  a backend; `run` as the Select-backed default.
+- I/O waits: `await_readable` (parks in the reactor, woken on readiness) and
   `sleep` (timers fire in deadline order).
 
 Test coverage (`test/test_troupe.ml`): counter/FIFO order, selective receive,
-request/reply via a returned address, wake-after-park, `await_readable` over a
-Unix pipe, and timer ordering.
+request/reply via a returned address, wake-after-park, and — run against *both*
+reactor backends — `await_readable` over a Unix pipe and timer ordering.
 
-Toolchain: OCaml ≥ 5.1, dune. Contributor setup is
-`opam install . --deps-only --with-test` (pulls `alcotest`).
+Toolchain: OCaml ≥ 5.1, dune, `iomux`. Contributor setup is
+`opam install . --deps-only --with-test` (also pulls `alcotest`).
 
 ---
 
@@ -256,8 +271,9 @@ Toolchain: OCaml ≥ 5.1, dune. Contributor setup is
 - **TUI / TEA layer** on top of Troupe: a `view`, a render actor, and an input
   source actor reading stdin via `await_readable`; subscriptions as actors that
   `sleep` and emit ticks.
-- **Additional reactor backends** (`poll` via iomux, or `epoll`/`kqueue`) behind
-  the existing `Reactor.S`, chosen at build time.
+- **Further reactor backends** (`epoll`/`kqueue`) behind the existing
+  `Reactor.S`, if descriptor counts ever warrant them. (`poll` via iomux is
+  done — see §5.)
 - **Writer readiness** and multiple waiters per fd, if a consumer needs them.
 - **Supervision** — restart strategies for failing actors.
 - **`yield`** — only if a real CPU-bound workload appears.

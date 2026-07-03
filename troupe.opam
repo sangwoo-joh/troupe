@@ -11,6 +11,7 @@ bug-reports: "https://github.com/sangwoo-joh/troupe/issues"
 depends: [
   "ocaml" {>= "5.1"}
   "dune" {>= "3.19"}
+  "iomux"
   "alcotest" {with-test}
   "odoc" {with-doc}
 ]

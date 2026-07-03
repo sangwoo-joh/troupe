@@ -21,4 +21,5 @@
  (depends
   (ocaml (>= 5.1))
   dune
+  iomux
   (alcotest :with-test)))

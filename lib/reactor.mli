@@ -18,5 +18,9 @@ end
 
 module Select : S
 (** A portable backend built on {!Unix.select}. Fine for a handful of
-    descriptors; swap in a [poll]/[epoll]/[kqueue] backend behind {!S} if you
-    ever watch many. *)
+    descriptors; swap in {!Poll} (or an [epoll]/[kqueue] backend) behind {!S} if
+    you ever watch many. *)
+
+module Poll : S
+(** A [poll(2)]-based backend using the [iomux] library. Portable
+    (Linux/macOS/BSD) and free of [select]'s descriptor-count limit. *)

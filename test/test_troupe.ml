@@ -59,12 +59,21 @@ let wake_after_park () =
       Troupe.send b "go");
   Alcotest.(check string) "parked actor resumed on later send" "woke" !got
 
-let await_readable () =
+let backends : (string * ((unit -> unit) -> unit)) list =
+  [
+    ("select", Troupe.run);
+    ( "poll",
+      fun main ->
+        let module S = Troupe.Scheduler.Make (Troupe.Reactor.Poll) in
+        S.run main );
+  ]
+
+let await_readable run () =
   (* The reader parks on an empty pipe; the writer, running later, makes it
-     readable and the scheduler wakes the reader out of [Unix.select]. *)
+     readable and the scheduler wakes the reader out of the reactor. *)
   let got = ref "" in
   let r, w = Unix.pipe () in
-  Troupe.run (fun () ->
+  run (fun () ->
       let _ : unit Troupe.Address.t =
         Troupe.cast (fun (_ : unit Troupe.self) ->
             Troupe.await_readable r;
@@ -81,9 +90,9 @@ let await_readable () =
   Unix.close w;
   Alcotest.(check string) "read what the writer sent" "hi" !got
 
-let timers_order () =
+let timers_order run () =
   let log = ref [] in
-  Troupe.run (fun () ->
+  run (fun () ->
       let _ : unit Troupe.Address.t =
         Troupe.cast (fun (_ : unit Troupe.self) ->
             Troupe.sleep 0.03;
@@ -109,8 +118,15 @@ let () =
           Alcotest.test_case "wake after park" `Quick wake_after_park;
         ] );
       ( "reactor",
-        [
-          Alcotest.test_case "await_readable" `Quick await_readable;
-          Alcotest.test_case "timers fire in order" `Quick timers_order;
-        ] );
+        List.concat_map
+          (fun (name, run) ->
+            [
+              Alcotest.test_case
+                (Printf.sprintf "await_readable (%s)" name)
+                `Quick (await_readable run);
+              Alcotest.test_case
+                (Printf.sprintf "timers fire in order (%s)" name)
+                `Quick (timers_order run);
+            ])
+          backends );
     ]

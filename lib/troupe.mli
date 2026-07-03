@@ -41,6 +41,9 @@ val await_readable : Unix.file_descr -> unit
 val sleep : float -> unit
 (** [sleep seconds] blocks the actor for at least [seconds]. *)
 
+module Reactor = Reactor
+(** I/O readiness backends. Pass one to {!Scheduler.Make}. *)
+
 module Scheduler : sig
   module Make (_ : Reactor.S) : sig
     val run : (unit -> unit) -> unit
