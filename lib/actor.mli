@@ -1,11 +1,8 @@
-(** A minimal actor model built on OCaml 5 effects.
+(** Actors and the operations they perform.
 
-    Each actor runs as its own fiber, processes messages from a private mailbox,
-    and blocks in {!receive} until a matching message arrives. The scheduler in
-    {!run} interprets the effects performed by [cast], [send], and [receive].
-
-    This module re-exports {!Actor} (the actor-facing API), {!Reactor} (I/O
-    backends), and {!Scheduler} (the effect handler), plus a default {!run}. *)
+    Each actor runs as its own fiber, owns a private mailbox, and blocks in
+    {!receive} until a matching message arrives. Every operation here performs an
+    effect that {!Scheduler} interprets. *)
 
 module Address : sig
   type 'msg t
@@ -43,15 +40,3 @@ val await_readable : Unix.file_descr -> unit
 
 val sleep : float -> unit
 (** [sleep seconds] blocks the actor for at least [seconds]. *)
-
-module Reactor = Reactor
-(** I/O readiness backends. Pass one to {!Scheduler.Make}. *)
-
-module Scheduler = Scheduler
-(** Build a scheduler over a chosen {!Reactor.S} backend. *)
-
-val run : (unit -> unit) -> unit
-(** [run main] runs [main] as the initial fiber under a fresh scheduler backed
-    by {!Reactor.Select}, and returns once every actor is idle — blocked with no
-    matching message, and with no outstanding descriptor or timer waits. [main]
-    may {!cast} actors and {!send} to them. *)

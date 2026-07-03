@@ -46,15 +46,22 @@ completely backend-agnostic — only the scheduler's handler consults the reacto
 
 ```
 lib/
-├── mailbox.mli/.ml   # FIFO queue with selective removal (internal)
+├── mailbox.mli/.ml   # FIFO queue with selective removal
+├── core.ml           # shared cell type + private effects (internal, no .mli)
+├── actor.mli/.ml     # self, body, Address, and the verbs (cast/send/receive/…)
 ├── reactor.mli/.ml   # module type S + Reactor.Select (Unix.select) / Reactor.Poll (iomux)
-└── troupe.mli/.ml    # cell, effects, Address, verbs, Scheduler.Make, run
+├── scheduler.mli/.ml # Scheduler.Make (R : Reactor.S) — the effect handler
+└── troupe.mli/.ml    # re-exports Actor, Reactor, Scheduler + a default run
 ```
 
-The engine (cell type, the effects, the verbs, and `Scheduler.Make`) lives in a
-single module, `Troupe`. `Mailbox` and `Reactor` are separate because they are
-genuinely standalone: `Mailbox` is a data structure, `Reactor` is a swappable
-backend with its own signature.
+The pieces that actors and the scheduler both depend on — the `cell` type and
+the effect constructors — live in `Core`, an internal module with **no `.mli`**.
+That keeps them visible to `Actor` (which performs the effects) and `Scheduler`
+(which matches them), while `Core` itself is never re-exported, so the effect
+constructors stay off the public API. `Actor` and `Scheduler` are the two named
+faces built on `Core`; `Troupe` is a thin module that re-exports them (plus
+`Reactor`) and supplies the default `run`. `Mailbox` and `Reactor` remain
+standalone: a data structure and a swappable backend, each with its own `.mli`.
 
 ### The public surface
 
@@ -168,15 +175,24 @@ theatrical *troupe*, so names lean literal-but-evocative rather than jargon:
 `send` and `receive` are kept literal — they are load-bearing and universally
 understood.
 
-### A single engine module (not one file per concept)
+### Module layout: an internal `Core`, then `Actor` / `Scheduler` / `Troupe`
 
 The runtime rests on one shared `cell` type used by `Address`, `self`, and the
-scheduler, and the scheduler must pattern-match the (private) effect
-constructors. Splitting these across compilation units would force abstract-type
-coercions or recursive modules and would leak the effect constructors through a
-public `.mli`. Keeping the engine in one module, with the effects private and
-`Scheduler.Make` as a submodule, is simpler and keeps the public API clean.
-`Mailbox` and `Reactor` stay separate because they are genuinely independent.
+scheduler, and the scheduler must pattern-match the effect constructors. The
+naïve split — an `actor.ml` and a `scheduler.ml` each with its own `.mli` —
+fights the module system: the shared `cell` needs abstract-type coercions or
+recursive modules, and the effect constructors would have to leak through a
+public `.mli` for both files to see them.
+
+An earlier iteration sidestepped this by putting the whole engine in one module.
+We since split it back out so that `Actor` and `Scheduler` are named concepts,
+using an **`.mli`-less `Core`** to hold exactly the two things they must share —
+the `cell` type and the effect constructors. Because `Core` has no interface, it
+is visible to its siblings but not re-exported by `Troupe`, so the effects stay
+private *without* any coercion gymnastics. `Actor` exposes the actor-facing API,
+`Scheduler` the handler, and `Troupe` re-exports both behind an unchanged public
+surface. `Mailbox` and `Reactor` stay separate because they are genuinely
+independent.
 
 ### `Unix.select` as the default; `Reactor.Poll` alongside it
 
