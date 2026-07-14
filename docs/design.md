@@ -54,6 +54,23 @@ lib/
 └── troupe.mli/.ml    # re-exports Actor, Reactor, Scheduler + a default run
 ```
 
+Module dependencies (`Core` is the shared, `.mli`-less base; `Select` / `Poll`
+are the two `Reactor.S` backends):
+
+```mermaid
+graph TD
+    Troupe --> Actor
+    Troupe --> Scheduler
+    Troupe --> Reactor
+    Actor --> Core
+    Scheduler --> Core
+    Scheduler --> Mailbox
+    Scheduler --> Reactor
+    Core --> Mailbox
+    Reactor --- Select
+    Reactor --- Poll
+```
+
 The pieces that actors and the scheduler both depend on — the `cell` type and
 the effect constructors — live in `Core`, an internal module with **no `.mli`**.
 That keeps them visible to `Actor` (which performs the effects) and `Scheduler`
@@ -111,6 +128,30 @@ mailbox only ever held `'msg` values.
 
 ### How the scheduler works
 
+Everything an actor does that could block is a `perform`, and the single effect
+handler is the only thing that touches the mailbox, the reactor, the timer list,
+and the run queue. Actors never see each other directly — they meet at the
+handler:
+
+```mermaid
+graph LR
+    body["actor body (fiber)"]
+    handler["Scheduler.effc (effect handler)"]
+    mb[("mailbox + waiting slot")]
+    rq[("run queue")]
+    reactor["Reactor backend"]
+    timers[("timers list")]
+
+    body -- "perform Cast / Send / Receive / Await_readable / Sleep" --> handler
+    handler -- "push / take" --> mb
+    handler -- "add_reader / remove_reader / wait" --> reactor
+    handler -- "record deadline" --> timers
+    handler -- "enqueue continuation" --> rq
+    rq -- "run thunk = continue k" --> body
+    reactor -- "fd ready → wake" --> handler
+    timers -- "expired → wake" --> handler
+```
+
 State inside `Scheduler.Make(R).run`:
 
 - **run queue** — ready-to-resume thunks (`unit -> unit`), type-erased.
@@ -130,11 +171,45 @@ loop:
   else                    -> quiescent: return
 ```
 
+```mermaid
+flowchart TD
+    L([loop]) --> Q{run queue nonempty?}
+    Q -- yes --> P[pop and run next thunk] --> L
+    Q -- no --> W{fd or timer waiters?}
+    W -- no --> D([quiescent: return])
+    W -- yes --> R["timeout = earliest deadline; R.wait wakes ready fds"]
+    R --> F[fire expired timers] --> L
+```
+
 `cast` mints a mailbox + `Address` and enqueues the child's fiber. `send` pushes
 to the target mailbox and, if the target is parked on a matching filter, enqueues
 its resume. `receive` scans the mailbox; on a hit it resumes immediately, on a
 miss it parks. Actors parked on a message with no possible sender simply wait
 forever — the loop still terminates, because only fd/timer waiters keep it alive.
+
+The park/wake handshake behind `receive` and `send` — B blocks on an empty
+mailbox, A's `send` delivers a matching message and re-enqueues B:
+
+```mermaid
+sequenceDiagram
+    participant A as Actor A (sender)
+    participant S as Scheduler handler
+    participant MB as mailbox of B
+    participant B as Actor B (receiver)
+
+    B->>S: perform Receive(self, filter)
+    S->>MB: take filter
+    MB-->>S: None
+    S->>S: park B — store (filter, k) in cell.waiting
+    Note over B: suspended
+
+    A->>S: perform Send(addr_B, msg)
+    S->>MB: push msg
+    S->>MB: take filter
+    MB-->>S: Some msg
+    S->>S: enqueue (continue k msg)
+    S->>B: resume with msg
+```
 
 ---
 
