@@ -1,48 +1,49 @@
-# Troupe — Design Notes
+# Troupe — 설계 노트
 
-Troupe is a small actor-model library for OCaml 5, built on algebraic effects.
-Each actor runs as its own fiber, owns a private mailbox, and blocks in a
-*selective receive* until a matching message arrives. A single scheduler
-interprets the effects that actors perform (`cast`, `send`, `receive`, and I/O
-waits), so actor code stays free of scheduling concerns.
+Troupe는 대수적 효과(algebraic effects) 위에 구축한 OCaml 5용 소형 액터 모델
+라이브러리입니다. 각 액터는 자신만의 파이버(fiber)로 실행되고, 전용 메일박스를
+소유하며, 조건에 맞는 메시지가 도착할 때까지 *선택적 수신(selective receive)*
+상태로 블록됩니다. 단일 스케줄러가 액터들이 수행(perform)하는 효과(`cast`,
+`send`, `receive`, 그리고 I/O 대기)를 해석하므로, 액터 코드는 스케줄링에 대한
+고민에서 자유롭습니다.
 
-The longer-term goal is to build a TUI framework — a parity of
-[The Elm Architecture](https://guide.elm-lang.org/architecture/) (TEA) — on top
-of this actor model. That intent shapes several decisions below; where it does,
-it is called out explicitly.
+장기적인 목표는 이 액터 모델 위에 TUI 프레임워크 —
+[The Elm Architecture](https://guide.elm-lang.org/architecture/) (TEA)에 대응하는
+것 — 를 구축하는 것입니다. 이 의도가 아래 여러 결정에 영향을 주며, 그런 경우에는
+명시적으로 언급했습니다.
 
-This document records what the library is, the principles behind it, the
-decisions we made and why, the trade-offs we accepted, and where things stand.
-
----
-
-## 1. Design principles
-
-**Effects for control flow, exceptions for errors.**
-Suspension — waiting for a message, an fd, or a timer — is expressed with
-effects. Genuine error conditions remain exceptions. Actors never see the
-suspension machinery; they just call `receive` / `await_readable` / `sleep` and
-appear to block.
-
-**Effects are interpreted by the runtime, not by domain logic.**
-The three actor verbs and two I/O verbs only ever `Effect.perform`. All meaning
-lives in one place — the scheduler's effect handler. This is what keeps actor
-bodies pure enough to reason about and lets the runtime be swapped without
-touching a single actor.
-
-**Layered design: sources suspend, one handler interprets.**
-Borrowed from the OCaml 5 effects design guidance: the code at the edges (an
-actor performing `await_readable`) suspends; the scheduler decides how to wait
-(via a `Reactor`); nothing in between needs to know about blocking. The same
-actor runs unchanged regardless of which reactor backend is installed.
-
-**Swappable runtime.**
-The scheduler is a functor over a `Reactor.S` backend. The actor-facing API is
-completely backend-agnostic — only the scheduler's handler consults the reactor.
+이 문서는 라이브러리가 무엇인지, 그 바탕이 되는 원칙, 우리가 내린 결정과 그
+이유, 우리가 받아들인 트레이드오프, 그리고 현재 상태를 기록합니다.
 
 ---
 
-## 2. Architecture
+## 1. 설계 원칙
+
+**제어 흐름에는 효과를, 오류에는 예외를.**
+중단(suspension) — 메시지, fd, 타이머를 기다리는 것 — 은 효과로 표현합니다.
+진짜 오류 상황은 예외로 남습니다. 액터는 중단 메커니즘을 결코 보지 못하며,
+그저 `receive` / `await_readable` / `sleep`을 호출하고 블록되는 것처럼 보일
+뿐입니다.
+
+**효과는 도메인 로직이 아니라 런타임이 해석한다.**
+세 개의 액터 동사와 두 개의 I/O 동사는 오직 `Effect.perform`만 할 뿐입니다.
+모든 의미는 한 곳 — 스케줄러의 효과 핸들러 — 에 있습니다. 바로 이것이 액터
+본문을 추론 가능할 만큼 순수하게 유지하고, 액터를 단 하나도 건드리지 않고
+런타임을 교체할 수 있게 해 줍니다.
+
+**계층적 설계: 소스는 중단하고, 하나의 핸들러가 해석한다.**
+OCaml 5 효과 설계 지침에서 빌려 온 원칙입니다. 가장자리의 코드(예:
+`await_readable`을 수행하는 액터)는 중단하고, 스케줄러는 어떻게 기다릴지(`Reactor`를
+통해) 결정하며, 그 사이의 어떤 것도 블로킹에 대해 알 필요가 없습니다. 어떤 리액터
+백엔드가 설치되어 있든 동일한 액터가 그대로 실행됩니다.
+
+**교체 가능한 런타임.**
+스케줄러는 `Reactor.S` 백엔드에 대한 펑터(functor)입니다. 액터를 향한 API는
+백엔드에 완전히 무관하며, 오직 스케줄러의 핸들러만 리액터를 참조합니다.
+
+---
+
+## 2. 아키텍처
 
 ```
 lib/
@@ -54,8 +55,8 @@ lib/
 └── troupe.mli/.ml    # re-exports Actor, Reactor, Scheduler + a default run
 ```
 
-Module dependencies (`Core` is the shared, `.mli`-less base; `Select` / `Poll`
-are the two `Reactor.S` backends):
+모듈 의존 관계(`Core`는 `.mli`가 없는 공유 기반이고, `Select` / `Poll`은 두
+`Reactor.S` 백엔드입니다):
 
 ```mermaid
 graph TD
@@ -71,16 +72,16 @@ graph TD
     Reactor --- Poll
 ```
 
-The pieces that actors and the scheduler both depend on — the `cell` type and
-the effect constructors — live in `Core`, an internal module with **no `.mli`**.
-That keeps them visible to `Actor` (which performs the effects) and `Scheduler`
-(which matches them), while `Core` itself is never re-exported, so the effect
-constructors stay off the public API. `Actor` and `Scheduler` are the two named
-faces built on `Core`; `Troupe` is a thin module that re-exports them (plus
-`Reactor`) and supplies the default `run`. `Mailbox` and `Reactor` remain
-standalone: a data structure and a swappable backend, each with its own `.mli`.
+액터와 스케줄러가 모두 의존하는 요소 — `cell` 타입과 효과 생성자 — 는 `.mli`가
+**없는** 내부 모듈 `Core`에 있습니다. 이렇게 하면 이 요소들이 `Actor`(효과를
+수행하는 쪽)와 `Scheduler`(효과를 매칭하는 쪽)에게는 보이면서도, `Core` 자체는
+결코 재노출(re-export)되지 않아 효과 생성자가 공개 API 밖에 머무릅니다. `Actor`와
+`Scheduler`는 `Core` 위에 지은 두 개의 명명된 얼굴이고, `Troupe`는 이 둘(그리고
+`Reactor`)을 재노출하며 기본 `run`을 제공하는 얇은 모듈입니다. `Mailbox`와
+`Reactor`는 독립적으로 남습니다. 각각 자료 구조와 교체 가능한 백엔드로서, 저마다의
+`.mli`를 가집니다.
 
-### The public surface
+### 공개 표면(public surface)
 
 ```ocaml
 module Address : sig
@@ -107,10 +108,10 @@ end
 val run : (unit -> unit) -> unit                (* = Make (Reactor.Select).run *)
 ```
 
-`Reactor` is re-exported from `Troupe` so external code can name a backend and
-apply the functor, e.g. `Troupe.Scheduler.Make (Troupe.Reactor.Poll)`.
+`Reactor`는 `Troupe`에서 재노출되므로, 외부 코드가 백엔드를 지정해 펑터를 적용할 수
+있습니다. 예: `Troupe.Scheduler.Make (Troupe.Reactor.Poll)`.
 
-### The effects (internal to `Troupe`)
+### 효과(`Troupe` 내부용)
 
 ```ocaml
 type _ Effect.t +=
@@ -121,17 +122,16 @@ type _ Effect.t +=
   | Sleep          : float -> unit Effect.t
 ```
 
-These constructors are **not** exported. The verbs `perform` them; the scheduler
-handler matches them. `Receive : 'msg cell * … -> 'msg Effect.t` is type-safe
-because the `cell` carries the phantom `'msg`, and `send`'s typing guarantees the
-mailbox only ever held `'msg` values.
+이 생성자들은 노출되지 **않습니다**. 동사들이 이들을 `perform`하고, 스케줄러
+핸들러가 이들을 매칭합니다. `Receive : 'msg cell * … -> 'msg Effect.t`가 타입
+안전한 이유는 `cell`이 팬텀 타입 `'msg`를 실어 나르고, `send`의 타이핑이 메일박스에
+오직 `'msg` 값만 담겼음을 보장하기 때문입니다.
 
-### How the scheduler works
+### 스케줄러의 동작 방식
 
-Everything an actor does that could block is a `perform`, and the single effect
-handler is the only thing that touches the mailbox, the reactor, the timer list,
-and the run queue. Actors never see each other directly — they meet at the
-handler:
+액터가 블록될 수 있는 모든 행위는 `perform`이며, 단일 효과 핸들러가 메일박스,
+리액터, 타이머 목록, 실행 큐를 건드리는 유일한 존재입니다. 액터들은 서로를 직접
+보지 못하고, 핸들러에서 만납니다:
 
 ```mermaid
 graph LR
@@ -152,15 +152,15 @@ graph LR
     timers -- "expired → wake" --> handler
 ```
 
-State inside `Scheduler.Make(R).run`:
+`Scheduler.Make(R).run` 내부의 상태:
 
-- **run queue** — ready-to-resume thunks (`unit -> unit`), type-erased.
-- **per-actor mailbox + `waiting` slot** — an actor blocked in `receive` stores
-  its `(filter, continuation)` in its own cell.
-- **fd waiters** — `fd → continuation`, registered with the reactor.
-- **timers** — `(deadline, continuation) list`.
+- **실행 큐(run queue)** — 재개할 준비가 된 썽크(`unit -> unit`), 타입이 소거됨.
+- **액터별 메일박스 + `waiting` 슬롯** — `receive`에서 블록된 액터는 자신의
+  `(filter, continuation)`을 자기 셀에 저장합니다.
+- **fd 대기자(fd waiters)** — `fd → continuation`, 리액터에 등록됨.
+- **타이머(timers)** — `(deadline, continuation) list`.
 
-The loop:
+루프:
 
 ```
 loop:
@@ -181,14 +181,14 @@ flowchart TD
     R --> F[fire expired timers] --> L
 ```
 
-`cast` mints a mailbox + `Address` and enqueues the child's fiber. `send` pushes
-to the target mailbox and, if the target is parked on a matching filter, enqueues
-its resume. `receive` scans the mailbox; on a hit it resumes immediately, on a
-miss it parks. Actors parked on a message with no possible sender simply wait
-forever — the loop still terminates, because only fd/timer waiters keep it alive.
+`cast`는 메일박스와 `Address`를 새로 만들고 자식의 파이버를 큐에 넣습니다. `send`는
+대상 메일박스에 밀어 넣고, 대상이 조건에 맞는 필터로 파킹되어 있으면 그 재개를 큐에
+넣습니다. `receive`는 메일박스를 스캔하여, 적중 시 즉시 재개하고, 실패 시 파킹합니다.
+보낼 수 있는 발신자가 없는 메시지에 파킹된 액터는 그저 영원히 기다립니다 — 그래도
+루프는 종료됩니다. 오직 fd/타이머 대기자만이 루프를 살아 있게 하기 때문입니다.
 
-The park/wake handshake behind `receive` and `send` — B blocks on an empty
-mailbox, A's `send` delivers a matching message and re-enqueues B:
+`receive`와 `send` 뒤에 있는 파킹/깨우기 핸드셰이크 — B는 빈 메일박스에서 블록되고,
+A의 `send`가 조건에 맞는 메시지를 전달하며 B를 다시 큐에 넣습니다:
 
 ```mermaid
 sequenceDiagram
@@ -213,158 +213,153 @@ sequenceDiagram
 
 ---
 
-## 3. Decisions and rationale
+## 3. 결정과 근거
 
-### Fiber-per-actor with selective receive (not a reducer)
+### 액터당 파이버 + 선택적 수신 (리듀서가 아님)
 
-An earlier sketch modelled behavior as a reducer, `state -> msg -> state`, which
-maps neatly onto TEA's `update`. We deliberately chose the heavier
-**fiber-per-actor** model instead: each actor is a real computation that drives
-its own loop and calls `receive`, including *selective* receive (Erlang's "save
-queue" semantics — take the first matching message, leave the rest in order).
+초기 스케치는 동작을 리듀서 `state -> msg -> state`로 모델링했는데, 이는 TEA의
+`update`에 깔끔하게 대응됩니다. 우리는 의도적으로 더 무거운 **액터당 파이버**
+모델을 대신 선택했습니다. 각 액터는 자신의 루프를 돌리며 `receive`를 호출하는 실제
+계산이고, 여기에는 *선택적* 수신(Erlang의 "save queue" 의미론 — 조건에 맞는 첫
+메시지를 취하고 나머지는 순서대로 남겨 둠)도 포함됩니다.
 
-Why the heavier option: the project is for learning, and selective receive over
-effects is the interesting core to build. The reducer style can still be
-expressed *on top* (a loop that receives and folds), so nothing is lost for the
-eventual TEA layer.
+더 무거운 쪽을 택한 이유: 이 프로젝트는 학습용이고, 효과 위에서의 선택적 수신이
+만들어 볼 만한 흥미로운 핵심이기 때문입니다. 리듀서 스타일은 여전히 *그 위에*
+표현할 수 있으므로(수신하고 접는 루프), 향후 TEA 계층을 위해 잃는 것은 없습니다.
 
-### `self` vs `Address` — split capabilities
+### `self` 대 `Address` — 능력(capability)의 분리
 
-Anyone can hold an `Address` and `send` to an actor; only the actor itself gets a
-`self`, and only `self` can `receive`. Both are the same runtime `cell`, exposed
-as two abstract types, so the split costs nothing at runtime but makes
-"everyone may send to me, only I may read my mailbox" a type-level guarantee.
-`address : 'msg self -> 'msg Address.t` is the one-way door.
+누구든 `Address`를 쥐고 액터에게 `send`할 수 있지만, 액터 자신만이 `self`를 받고,
+오직 `self`만이 `receive`할 수 있습니다. 둘은 같은 런타임 `cell`을 두 개의 추상
+타입으로 노출한 것이므로, 이 분리는 런타임 비용이 전혀 없으면서 "누구나 나에게
+보낼 수 있지만, 내 메일박스는 나만 읽을 수 있다"를 타입 수준의 보장으로 만듭니다.
+`address : 'msg self -> 'msg Address.t`가 그 일방향 문입니다.
 
-### Naming: `Address`, `cast`, `perform`
+### 명명: `Address`, `cast`, `perform`
 
-We follow Erlang's *structure* but not its naming. The library is themed as a
-theatrical *troupe*, so names lean literal-but-evocative rather than jargon:
+우리는 Erlang의 *구조*는 따르되 그 명명은 따르지 않습니다. 이 라이브러리는 연극
+*troupe(극단)*를 테마로 하므로, 이름은 은어보다는 문자적이면서도 함축적인 쪽으로
+기울입니다:
 
-- **`Address`** over `Pid`/`Ref` — where you send messages; `Ref` also collides
-  with OCaml's `ref`.
-- **`cast`** over `spawn` — you *cast* an actor into the troupe.
-- **`perform`** (the eventual `run`-family verb theme) fits both the effects
-  vocabulary and the stage metaphor.
+- **`Address`** (`Pid`/`Ref` 대신) — 메시지를 보내는 곳이며, `Ref`는 OCaml의
+  `ref`와도 충돌합니다.
+- **`cast`** (`spawn` 대신) — 액터를 극단으로 *배역 결정(cast)*합니다.
+- **`perform`** (궁극의 `run` 계열 동사 테마) — 효과의 어휘와 무대 은유 양쪽에
+  모두 들어맞습니다.
 
-`send` and `receive` are kept literal — they are load-bearing and universally
-understood.
+`send`와 `receive`는 문자 그대로 유지합니다 — 핵심적이고 보편적으로 이해되기
+때문입니다.
 
-### Module layout: an internal `Core`, then `Actor` / `Scheduler` / `Troupe`
+### 모듈 배치: 내부 `Core`, 그다음 `Actor` / `Scheduler` / `Troupe`
 
-The runtime rests on one shared `cell` type used by `Address`, `self`, and the
-scheduler, and the scheduler must pattern-match the effect constructors. The
-naïve split — an `actor.ml` and a `scheduler.ml` each with its own `.mli` —
-fights the module system: the shared `cell` needs abstract-type coercions or
-recursive modules, and the effect constructors would have to leak through a
-public `.mli` for both files to see them.
+런타임은 `Address`, `self`, 스케줄러가 함께 쓰는 하나의 공유 `cell` 타입 위에
+얹혀 있고, 스케줄러는 효과 생성자를 패턴 매칭해야 합니다. 순진한 분리 — 각자
+`.mli`를 가진 `actor.ml`과 `scheduler.ml` — 는 모듈 시스템과 부딪힙니다. 공유 `cell`은
+추상 타입 강제 변환이나 재귀 모듈을 필요로 하고, 효과 생성자는 두 파일이 모두 볼 수
+있도록 공개 `.mli`를 통해 새어 나가야 하기 때문입니다.
 
-An earlier iteration sidestepped this by putting the whole engine in one module.
-We since split it back out so that `Actor` and `Scheduler` are named concepts,
-using an **`.mli`-less `Core`** to hold exactly the two things they must share —
-the `cell` type and the effect constructors. Because `Core` has no interface, it
-is visible to its siblings but not re-exported by `Troupe`, so the effects stay
-private *without* any coercion gymnastics. `Actor` exposes the actor-facing API,
-`Scheduler` the handler, and `Troupe` re-exports both behind an unchanged public
-surface. `Mailbox` and `Reactor` stay separate because they are genuinely
-independent.
+초기 반복(iteration)에서는 엔진 전체를 한 모듈에 넣어 이 문제를 피했습니다. 이후
+`Actor`와 `Scheduler`를 명명된 개념으로 만들기 위해 다시 분리하면서, 이 둘이 반드시
+공유해야 하는 딱 두 가지 — `cell` 타입과 효과 생성자 — 만 담는 **`.mli` 없는
+`Core`**를 사용했습니다. `Core`는 인터페이스가 없으므로 형제 모듈에게는 보이지만
+`Troupe`에서 재노출되지 않아, 어떤 강제 변환 곡예도 없이 효과가 비공개로 유지됩니다.
+`Actor`는 액터를 향한 API를, `Scheduler`는 핸들러를 노출하고, `Troupe`는 변하지 않는
+공개 표면 뒤에서 둘 다 재노출합니다. `Mailbox`와 `Reactor`는 진정으로 독립적이므로
+분리된 채로 둡니다.
 
-### `Unix.select` as the default; `Reactor.Poll` alongside it
+### 기본값으로서의 `Unix.select`, 그 곁의 `Reactor.Poll`
 
-For I/O readiness the default is the stdlib **`Unix.select`** (`Reactor.Select`),
-behind a `Reactor.S` signature consumed by `Scheduler.Make`. A second backend,
-**`Reactor.Poll`** over `poll(2)` (via the `iomux` library), ships alongside it.
-Reasoning:
+I/O 준비 상태(readiness)의 기본값은 표준 라이브러리 **`Unix.select`**
+(`Reactor.Select`)이며, `Scheduler.Make`가 소비하는 `Reactor.S` 시그니처 뒤에
+있습니다. 두 번째 백엔드인 **`Reactor.Poll`** — `poll(2)` 위에(`iomux` 라이브러리를
+통해) — 가 그 곁에 함께 제공됩니다. 근거:
 
-- **io_uring** (Eio's `eio_linux` backend) carries a history of security issues
-  and is disabled in some hardened environments.
-- **epoll** is Linux-only — it does not exist on macOS (our dev platform is
-  Darwin; the kernel equivalent there is `kqueue`). An epoll reactor could not
-  even run locally.
-- **`iomux`** currently implements only `poll(2)`/`ppoll(2)` (epoll/kqueue are
-  stated goals, not yet implemented). `poll(2)` is itself portable
-  (Linux/macOS/BSD) and free of `select`'s descriptor-count limit, so
-  `Reactor.Poll` runs everywhere `Select` does.
-- At TUI scale — one or two descriptors (stdin, maybe a signal pipe) — `select`
-  is as fast as anything and is dependency-free, so it stays the default.
+- **io_uring** (Eio의 `eio_linux` 백엔드)는 보안 이슈의 이력이 있고 일부 강화된
+  환경에서는 비활성화되어 있습니다.
+- **epoll**은 Linux 전용이라 macOS에는 존재하지 않습니다(우리의 개발 플랫폼은
+  Darwin이고, 거기서의 커널 대응물은 `kqueue`입니다). epoll 리액터는 로컬에서
+  실행조차 할 수 없습니다.
+- **`iomux`**는 현재 `poll(2)`/`ppoll(2)`만 구현합니다(epoll/kqueue는 명시된
+  목표일 뿐 아직 미구현). `poll(2)` 자체가 이식성이 있고(Linux/macOS/BSD) `select`의
+  디스크립터 개수 제한이 없으므로, `Reactor.Poll`은 `Select`가 도는 모든 곳에서
+  동작합니다.
+- TUI 규모 — 디스크립터 한두 개(stdin, 어쩌면 시그널 파이프) — 에서는 `select`가
+  무엇 못지않게 빠르고 의존성도 없으므로, 기본값으로 남습니다.
 
-The functor made this cheap: `Reactor.Poll` dropped in behind `Reactor.S` with no
-change to the scheduler or any actor, and the same tests run against both. A
-future `epoll`/`kqueue` backend would arrive the same way.
+펑터 덕분에 이 작업이 저렴했습니다. `Reactor.Poll`은 스케줄러나 어떤 액터도 바꾸지
+않고 `Reactor.S` 뒤에 그대로 끼워 넣어졌으며, 동일한 테스트가 둘 다에 대해
+실행됩니다. 향후 `epoll`/`kqueue` 백엔드도 같은 방식으로 도착할 것입니다.
 
-### The reactor owns fd readiness; the scheduler owns timers
+### fd 준비 상태는 리액터가, 타이머는 스케줄러가 소유한다
 
-`Reactor.S` is kept to `add_reader` / `remove_reader` / `wait ~timeout`. The
-timer heap lives in the scheduler, which simply passes `wait` a computed
-timeout. This keeps the backend signature tiny, so a future backend has very
-little to implement.
+`Reactor.S`는 `add_reader` / `remove_reader` / `wait ~timeout`으로 좁게
+유지됩니다. 타이머 힙은 스케줄러에 있으며, 스케줄러는 계산된 타임아웃을 `wait`에
+그저 넘겨줄 뿐입니다. 이렇게 하면 백엔드 시그니처가 작게 유지되어, 향후 백엔드가
+구현해야 할 것이 아주 적어집니다.
 
-### Scope: reactor deferred, then built with a real consumer
+### 범위: 리액터는 미뤘다가, 실제 소비자와 함께 만들었다
 
-The actor core was built first with **no** I/O — `cast`/`send`/`receive` and
-run-to-quiescence need none. The reactor was added only when we could give it a
-genuine consumer (tests driving a pipe and timers), rather than speculatively.
-The TUI layer, which will actually consume `await_readable` (stdin) and `sleep`
-(tick subscriptions), is the next such step.
+액터 코어는 I/O **없이** 먼저 만들어졌습니다 — `cast`/`send`/`receive`와
+정지 상태까지의 실행(run-to-quiescence)에는 I/O가 필요 없습니다. 리액터는 투기적으로
+만들지 않고, 진짜 소비자(파이프와 타이머를 구동하는 테스트)를 줄 수 있게 되었을 때
+비로소 추가했습니다. `await_readable`(stdin)과 `sleep`(틱 구독)을 실제로 소비할
+TUI 계층이 그다음 그런 단계입니다.
 
 ---
 
-## 4. Trade-offs and known limitations
+## 4. 트레이드오프와 알려진 한계
 
-- **Single-threaded, cooperative.** One domain; actors interleave at
-  `receive`/`await_readable`/`sleep` points. No parallelism, no preemption. A
-  CPU-bound actor that never suspends will starve the rest (a `yield` escape
-  hatch was considered and deliberately left out until something needs it).
-- **Reactor watches readers only, one waiter per fd.** No write-readiness and no
-  multiple actors per descriptor. Neither is needed for a TUI; both extend
-  cleanly behind the existing interface.
-- **Timers are an unsorted list**, scanned each idle tick — fine for a handful,
-  not for thousands. Swap for a heap if that ever matters.
-- **Mailbox `take` is O(n)** per selective receive (it rebuilds the queue).
-  Acceptable for small mailboxes.
-- **No supervision / restart strategies yet.** An uncaught exception in an actor
-  propagates out of the scheduler via the handler's `exnc`.
-- **`select`'s `FD_SETSIZE` limit** (~1024) applies to the default backend but is
-  irrelevant at the descriptor counts we target; `Reactor.Poll` has no such
-  limit.
-- **Timer resolution differs by backend.** `Reactor.Select` takes a float-seconds
-  timeout; `Reactor.Poll` takes integer milliseconds (`poll(2)`), so `sleep`
-  rounds up to the next millisecond there. Irrelevant for tick subscriptions;
-  sub-millisecond timers would need `ppoll` (which iomux emulates on macOS, as
-  Darwin lacks a real `ppoll`).
-
----
-
-## 5. Current status
-
-Implemented and tested (`dune build`, `dune test`):
-
-- Mailbox with FIFO and selective removal.
-- Fiber-per-actor scheduler: `cast`, `send`, selective `receive`, park/wake,
-  run-to-quiescence.
-- `Reactor.S` with two backends — `Reactor.Select` (default) and `Reactor.Poll`
-  (iomux); `Scheduler.Make` functor; `Reactor` re-exported so consumers can pick
-  a backend; `run` as the Select-backed default.
-- I/O waits: `await_readable` (parks in the reactor, woken on readiness) and
-  `sleep` (timers fire in deadline order).
-
-Test coverage (`test/test_troupe.ml`): counter/FIFO order, selective receive,
-request/reply via a returned address, wake-after-park, and — run against *both*
-reactor backends — `await_readable` over a Unix pipe and timer ordering.
-
-Toolchain: OCaml ≥ 5.1, dune, `iomux`. Contributor setup is
-`opam install . --deps-only --with-test` (also pulls `alcotest`).
+- **단일 스레드, 협력적(cooperative).** 하나의 도메인이며, 액터들은
+  `receive`/`await_readable`/`sleep` 지점에서 교차 실행됩니다. 병렬성도, 선점도
+  없습니다. 결코 중단하지 않는 CPU 바운드 액터는 나머지를 굶깁니다(`yield` 탈출구를
+  고려했으나, 무언가 필요로 할 때까지 의도적으로 배제했습니다).
+- **리액터는 읽기 준비 상태만 감시하며, fd당 대기자는 하나.** 쓰기 준비 상태도,
+  디스크립터당 여러 액터도 없습니다. TUI에는 둘 다 필요 없으며, 둘 다 기존 인터페이스
+  뒤에서 깔끔하게 확장됩니다.
+- **타이머는 정렬되지 않은 리스트**로, 유휴 틱마다 스캔됩니다 — 소수에는 괜찮지만
+  수천 개에는 아닙니다. 필요해지면 힙으로 교체하면 됩니다.
+- **메일박스 `take`는 선택적 수신마다 O(n)**입니다(큐를 다시 만듭니다). 작은
+  메일박스에는 허용 가능합니다.
+- **아직 감독/재시작 전략 없음.** 액터에서 잡히지 않은 예외는 핸들러의 `exnc`를
+  통해 스케줄러 밖으로 전파됩니다.
+- **`select`의 `FD_SETSIZE` 제한**(~1024)은 기본 백엔드에 적용되지만, 우리가
+  겨냥하는 디스크립터 개수에서는 무관합니다. `Reactor.Poll`에는 그런 제한이 없습니다.
+- **타이머 해상도는 백엔드마다 다름.** `Reactor.Select`는 부동소수 초 단위
+  타임아웃을 받고, `Reactor.Poll`은 정수 밀리초(`poll(2)`)를 받으므로 거기서는
+  `sleep`이 다음 밀리초로 올림됩니다. 틱 구독에는 무관하며, 밀리초 미만 타이머는
+  `ppoll`이 필요합니다(iomux가 macOS에서 이를 에뮬레이션합니다. Darwin에는 진짜
+  `ppoll`이 없기 때문입니다).
 
 ---
 
-## 6. Roadmap
+## 5. 현재 상태
 
-- **TUI / TEA layer** on top of Troupe: a `view`, a render actor, and an input
-  source actor reading stdin via `await_readable`; subscriptions as actors that
-  `sleep` and emit ticks.
-- **Further reactor backends** (`epoll`/`kqueue`) behind the existing
-  `Reactor.S`, if descriptor counts ever warrant them. (`poll` via iomux is
-  done — see §5.)
-- **Writer readiness** and multiple waiters per fd, if a consumer needs them.
-- **Supervision** — restart strategies for failing actors.
-- **`yield`** — only if a real CPU-bound workload appears.
+구현 및 테스트 완료(`dune build`, `dune test`):
+
+- FIFO와 선택적 제거를 갖춘 메일박스.
+- 액터당 파이버 스케줄러: `cast`, `send`, 선택적 `receive`, 파킹/깨우기,
+  정지 상태까지의 실행.
+- 두 백엔드를 갖춘 `Reactor.S` — `Reactor.Select`(기본)와 `Reactor.Poll`(iomux);
+  `Scheduler.Make` 펑터; 소비자가 백엔드를 고를 수 있도록 재노출된 `Reactor`;
+  Select 기반 기본값인 `run`.
+- I/O 대기: `await_readable`(리액터에 파킹되어 준비 시 깨어남)과 `sleep`(타이머가
+  마감 순서대로 발화).
+
+테스트 커버리지(`test/test_troupe.ml`): 카운터/FIFO 순서, 선택적 수신, 반환된
+주소를 통한 요청/응답, 파킹 후 깨우기, 그리고 — *두* 리액터 백엔드 모두에 대해
+실행 — Unix 파이프 위에서의 `await_readable`과 타이머 순서.
+
+툴체인: OCaml ≥ 5.1, dune, `iomux`. 기여자 설정은
+`opam install . --deps-only --with-test`입니다(`alcotest`도 함께 받습니다).
+
+---
+
+## 6. 로드맵
+
+- Troupe 위의 **TUI / TEA 계층**: `view`, 렌더 액터, 그리고 `await_readable`로
+  stdin을 읽는 입력 소스 액터; `sleep`하고 틱을 방출하는 액터로서의 구독.
+- 디스크립터 개수가 정당화한다면, 기존 `Reactor.S` 뒤의 **추가 리액터
+  백엔드**(`epoll`/`kqueue`). (iomux를 통한 `poll`은 완료됨 — §5 참조.)
+- 소비자가 필요로 한다면 **쓰기 준비 상태**와 fd당 여러 대기자.
+- **감독(supervision)** — 실패하는 액터를 위한 재시작 전략.
+- **`yield`** — 실제 CPU 바운드 워크로드가 나타날 때만.
