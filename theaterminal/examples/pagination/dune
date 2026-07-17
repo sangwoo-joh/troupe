@@ -1,0 +1,3 @@
+(executable
+ (name pagination)
+ (libraries theaterminal))
