@@ -38,9 +38,10 @@ let () =
       update;
       view;
       subscriptions =
-        Sub.keys (function
-          | Event.Left -> Some Prev
-          | Event.Right -> Some Next
-          | Event.Char 'q' -> Some Quit
-          | _ -> None);
+        (fun _ ->
+          Sub.keys (function
+            | Event.Left -> Some Prev
+            | Event.Right -> Some Next
+            | Event.Char 'q' -> Some Quit
+            | _ -> None));
     }

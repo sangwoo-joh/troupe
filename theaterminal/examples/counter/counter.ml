@@ -51,9 +51,10 @@ let () =
       update;
       view;
       subscriptions =
-        Sub.batch
-          [
-            Sub.every 0.03 (fun () -> Tick);
-            Sub.keys (function Event.Char 'q' -> Some Quit | _ -> None);
-          ];
+        (fun _ ->
+          Sub.batch
+            [
+              Sub.every 0.03 (fun () -> Tick);
+              Sub.keys (function Event.Char 'q' -> Some Quit | _ -> None);
+            ]);
     }

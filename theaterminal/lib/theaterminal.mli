@@ -16,7 +16,9 @@ type ('model, 'msg) app = {
   init : 'model * 'msg Cmd.t;  (** initial model and startup command *)
   update : 'msg -> 'model -> 'model * 'msg Cmd.t;
   view : 'model -> string;  (** the full frame to draw, lines split by ['\n'] *)
-  subscriptions : 'msg Sub.t;
+  subscriptions : 'model -> 'msg Sub.t;
+      (** Sampled after every update; the runtime starts and stops sources to
+          match, so a source can be turned off by dropping it from the result. *)
 }
 
 val run : ('model, 'msg) app -> unit

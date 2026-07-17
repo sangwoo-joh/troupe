@@ -100,6 +100,7 @@ val address : 'msg self -> 'msg Address.t
 
 val await_readable : Unix.file_descr -> unit
 val sleep          : float -> unit
+val stop           : 'msg Address.t -> unit
 
 module Reactor : ...                            (* re-exported: S, Select, Poll *)
 module Scheduler : sig
@@ -120,6 +121,7 @@ type _ Effect.t +=
   | Receive        : 'msg cell * ('msg -> bool) -> 'msg Effect.t
   | Await_readable : Unix.file_descr -> unit Effect.t
   | Sleep          : float -> unit Effect.t
+  | Stop           : 'msg cell -> unit Effect.t
 ```
 
 이 생성자들은 노출되지 **않습니다**. 동사들이 이들을 `perform`하고, 스케줄러
@@ -142,7 +144,7 @@ graph LR
     reactor["Reactor backend"]
     timers[("timers list")]
 
-    body -- "perform Cast / Send / Receive / Await_readable / Sleep" --> handler
+    body -- "perform Cast / Send / Receive / Await_readable / Sleep / Stop" --> handler
     handler -- "push / take" --> mb
     handler -- "add_reader / remove_reader / wait" --> reactor
     handler -- "record deadline" --> timers
@@ -296,6 +298,25 @@ I/O 준비 상태(readiness)의 기본값은 표준 라이브러리 **`Unix.sele
 유지됩니다. 타이머 힙은 스케줄러에 있으며, 스케줄러는 계산된 타임아웃을 `wait`에
 그저 넘겨줄 뿐입니다. 이렇게 하면 백엔드 시그니처가 작게 유지되어, 향후 백엔드가
 구현해야 할 것이 아주 적어집니다.
+
+### 취소(`stop`): `alive` 플래그 + continuation 폐기
+
+`stop addr`은 park 상태든 실행 대기 상태든 액터를 취소합니다. 스케줄러는 park된
+continuation을 밖에서 되살릴 수 없으므로, 취소는 **continuation을 되살리지 않고 버리는**
+방식입니다.
+
+- 셀에 `mutable alive` 플래그를 둡니다. 모든 재개(resume)는 실행 큐에 넣기 전이 아니라
+  **실행되는 순간** 이 플래그를 확인해, 죽은 액터면 `continue`를 건너뛰고 continuation을
+  버립니다. 이로써 이미 큐에 들어간 재개(타이머가 막 발화한 경우 등)도 안전하게 무효화됩니다.
+- 액터별 핸들러가 자기 셀을 클로저로 잡으므로, park 시점에 소유자를 압니다. `fd_waiters`와
+  타이머 항목은 소유 셀을 타입 소거(`Packed`)해 함께 들고 있습니다.
+- `stop`은 `alive <- false` 후, 그 셀의 `receive` continuation(있으면)을 비우고,
+  **타이머 큐에서 그 셀의 항목을 제거**하며, `fd_waiters`를 훑어 그 셀이 기다리던 fd를
+  찾아 `remove_reader`합니다. 덕분에 취소된 타이머·fd 대기가 스케줄러의 유휴 판정을 막지
+  않아, `run`이 정상적으로 끝납니다.
+
+이것이 상위 TEA 계층의 **동적 구독**을 떠받칩니다: 모델이 바뀌어 어떤 구독이 사라지면,
+`sleep`에 park된 타이머 액터를 즉시 멈출 수 있습니다.
 
 ### 범위: 리액터는 미뤘다가, 실제 소비자와 함께 만들었다
 

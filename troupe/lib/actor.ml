@@ -15,3 +15,4 @@ let receive self ?(matching = fun _ -> true) () =
 let address self = self
 let await_readable fd = Effect.perform (Core.Await_readable fd)
 let sleep seconds = Effect.perform (Core.Sleep seconds)
+let stop addr = Effect.perform (Core.Stop addr)

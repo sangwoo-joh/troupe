@@ -44,6 +44,11 @@ val await_readable : Unix.file_descr -> unit
 val sleep : float -> unit
 (** [sleep seconds] blocks the actor for at least [seconds]. *)
 
+val stop : 'msg Address.t -> unit
+(** [stop addr] cancels the actor at [addr]: it never runs again, and any
+    descriptor or timer it was blocked on is released. Messages already queued
+    for it are discarded. Stopping a finished actor is a no-op. *)
+
 module Reactor = Reactor
 (** I/O readiness backends. Pass one to {!Scheduler.Make}. *)
 

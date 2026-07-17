@@ -44,10 +44,11 @@ let () =
       update;
       view;
       subscriptions =
-        Sub.keys (function
-          | Event.Up -> Some Up
-          | Event.Down -> Some Down
-          | Event.Char ' ' -> Some Toggle
-          | Event.Char 'q' -> Some Quit
-          | _ -> None);
+        (fun _ ->
+          Sub.keys (function
+            | Event.Up -> Some Up
+            | Event.Down -> Some Down
+            | Event.Char ' ' -> Some Toggle
+            | Event.Char 'q' -> Some Quit
+            | _ -> None));
     }

@@ -107,6 +107,24 @@ let timers_order run () =
   Alcotest.(check (list string))
     "shorter sleep fires first" [ "fast"; "slow" ] (List.rev !log)
 
+(* A cancelled actor must not resume from a timer, and its removal must let the
+   scheduler settle rather than wait out the full sleep. *)
+let stop_cancels_sleeping_actor () =
+  let fired = ref false in
+  Troupe.run (fun () ->
+      let a = Troupe.cast (fun _ -> Troupe.sleep 2.0; fired := true) in
+      Troupe.sleep 0.05;
+      Troupe.stop a);
+  Alcotest.(check bool) "sleeping actor cancelled before firing" false !fired
+
+(* Stopping before the body has run at all drops the initial resume. *)
+let stop_before_first_run () =
+  let fired = ref false in
+  Troupe.run (fun () ->
+      let a = Troupe.cast (fun _ -> fired := true) in
+      Troupe.stop a);
+  Alcotest.(check bool) "actor stopped before running never ran" false !fired
+
 let () =
   Alcotest.run "troupe"
     [
@@ -116,6 +134,9 @@ let () =
           Alcotest.test_case "selective receive" `Quick selective_receive;
           Alcotest.test_case "request/reply" `Quick request_reply;
           Alcotest.test_case "wake after park" `Quick wake_after_park;
+          Alcotest.test_case "stop cancels sleeping actor" `Quick
+            stop_cancels_sleeping_actor;
+          Alcotest.test_case "stop before first run" `Quick stop_before_first_run;
         ] );
       ( "reactor",
         List.concat_map

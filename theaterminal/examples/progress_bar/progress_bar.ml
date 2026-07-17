@@ -35,5 +35,5 @@ let () =
       init = (Array.make 4 0, Cmd.none);
       update;
       view;
-      subscriptions = Sub.every 0.12 (fun () -> Tick);
+      subscriptions = (fun _ -> Sub.every 0.12 (fun () -> Tick));
     }

@@ -9,6 +9,7 @@ type 'msg cell = {
   mailbox : 'msg Mailbox.t;
   mutable waiting :
     (('msg -> bool) * ('msg, unit) Effect.Deep.continuation) option;
+  mutable alive : bool;
 }
 
 type 'msg self = 'msg cell
@@ -20,3 +21,4 @@ type _ Effect.t +=
   | Receive : 'msg cell * ('msg -> bool) -> 'msg Effect.t
   | Await_readable : Unix.file_descr -> unit Effect.t
   | Sleep : float -> unit Effect.t
+  | Stop : 'msg cell -> unit Effect.t
