@@ -1,0 +1,5 @@
+(executable
+ (name main)
+ (public_name caravan)
+ (package caravan)
+ (libraries theaterminal))

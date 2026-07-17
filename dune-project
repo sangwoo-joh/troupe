@@ -1,11 +1,11 @@
 (lang dune 3.19)
 
-(name troupe)
+(name caravan)
 
 (generate_opam_files true)
 
 (source
- (github sangwoo-joh/troupe))
+ (github sangwoo-joh/caravan))
 
 (authors "Sangwoo Joh <work.sangwoo.joh@gmail.com>")
 
@@ -23,3 +23,23 @@
   dune
   iomux
   (alcotest :with-test)))
+
+(package
+ (name theaterminal)
+ (synopsis "A TEA-based TUI framework built on troupe")
+ (description
+  "Theaterminal is a TUI framework following The Elm Architecture (model/update/view), driven by the troupe actor runtime.")
+ (depends
+  (ocaml (>= 5.1))
+  dune
+  troupe))
+
+(package
+ (name caravan)
+ (synopsis "A TUI chess game")
+ (description
+  "Caravan is a terminal chess game built with the theaterminal TUI framework.")
+ (depends
+  (ocaml (>= 5.1))
+  dune
+  theaterminal))
