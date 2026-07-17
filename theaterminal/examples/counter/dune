@@ -1,3 +1,3 @@
 (executable
  (name counter)
- (libraries theaterminal))
+ (libraries theaterminal unix))
