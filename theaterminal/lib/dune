@@ -1,4 +1,4 @@
 (library
  (public_name theaterminal)
  (name theaterminal)
- (libraries troupe))
+ (libraries troupe unix))
