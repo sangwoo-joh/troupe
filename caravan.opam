@@ -5,7 +5,7 @@ description:
   "Caravan is a terminal chess game built with the theaterminal TUI framework."
 maintainer: ["Sangwoo Joh <work.sangwoo.joh@gmail.com>"]
 authors: ["Sangwoo Joh <work.sangwoo.joh@gmail.com>"]
-license: "LICENSE"
+license: "MIT"
 homepage: "https://github.com/sangwoo-joh/caravan"
 bug-reports: "https://github.com/sangwoo-joh/caravan/issues"
 depends: [

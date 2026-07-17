@@ -5,7 +5,7 @@ description:
   "Troupe is a small actor library where each actor runs as its own fiber, processes messages from a private mailbox, and blocks in a selective receive until a matching message arrives."
 maintainer: ["Sangwoo Joh <work.sangwoo.joh@gmail.com>"]
 authors: ["Sangwoo Joh <work.sangwoo.joh@gmail.com>"]
-license: "LICENSE"
+license: "MIT"
 homepage: "https://github.com/sangwoo-joh/caravan"
 bug-reports: "https://github.com/sangwoo-joh/caravan/issues"
 depends: [

@@ -11,7 +11,7 @@
 
 (maintainers "Sangwoo Joh <work.sangwoo.joh@gmail.com>")
 
-(license LICENSE)
+(license MIT)
 
 (package
  (name troupe)

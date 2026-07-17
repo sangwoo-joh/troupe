@@ -5,7 +5,7 @@ description:
   "Theaterminal is a TUI framework following The Elm Architecture (model/update/view), driven by the troupe actor runtime."
 maintainer: ["Sangwoo Joh <work.sangwoo.joh@gmail.com>"]
 authors: ["Sangwoo Joh <work.sangwoo.joh@gmail.com>"]
-license: "LICENSE"
+license: "MIT"
 homepage: "https://github.com/sangwoo-joh/caravan"
 bug-reports: "https://github.com/sangwoo-joh/caravan/issues"
 depends: [
